@@ -51,18 +51,19 @@ class Client():
     def make_policy_decision(self, policy_type, hand_pai):
         if policy_type == 'exchange':
             hand_pai = sorted(hand_pai.items(), key=lambda item: len(item[1]))
-            for key in hand_pai:
-                if len(hand_pai[key]) >= 3:
-                    three = self.choose_from_pai(hand_pai[key])
-                    return key, three
+            # print(hand_pai)
+            for key in range(len(hand_pai)):
+                if len(hand_pai[key][1]) >= 3:
+                    three = self.choose_from_pai(hand_pai[key][1])
+                    return hand_pai[key][0], three
         else:
             pass
 
-    def trible_charge(self, list_pai):
+    def trible_charge(self):
         tong_pai = []
         tiao_pai = []
         wan_pai = []
-        for one in list_pai:
+        for one in self.list_pai:
             one -= 1
             num = ((one % 36) // 4) + 1
             if one // 36 == 0:
@@ -75,11 +76,28 @@ class Client():
         hand_pai['tong'] = tong_pai
         hand_pai['tiao'] = tiao_pai
         hand_pai['wan'] = wan_pai
-        key, three = self.make_policy_decision(list_pai, hand_pai)
+        key, three = self.make_policy_decision('exchange', hand_pai)
+        self.print_log(key, three)
 
-    def decide(self):
+    def print_log(self, key, three):
+        out_str = ''
+        three = [str(i) for i in three]
+        if key == 'tong':
+            out_str += '@ '.join(three)
+            out_str += '@'
+        elif key == 'tiao':
+            out_str += '| '.join(three)
+            out_str += '|'
+        else:
+            out_str += 'W '.join(three)
+            out_str += 'W'
+        print(out_str)
+
+    def decide(self, list_pai=[]):
+        if not list_pai:
+            list_pai = self.list_pai
         str_pai = ''
-        for one in self.list_pai:
+        for one in list_pai:
             one -= 1
             num = ((one % 36) // 4) + 1
             if one // 36 == 0:
@@ -96,3 +114,4 @@ if __name__ == '__main__':
     client.get_table()
     client.start()
     client.decide()
+    client.trible_charge()
