@@ -59,7 +59,40 @@ class Client():
         else:
             pass
 
+    def reverse_by_key(self, key, three):
+        num_list = []
+        if key == 'tong':
+            for one in three:
+                min_num = (one - 1) * 4 + 1
+                max_num = one + 4
+                for pai in self.list_pai:
+                    if pai >= min_num and pai <= max_num:
+                        self.list_pai.remove(pai)
+                        num_list.append(pai)
+                        break
+        elif key == 'tiao':
+            for one in three:
+                min_num = (one - 1) * 4 + 1 + 36
+                max_num = one + 4 + 36
+                for pai in self.list_pai:
+                    if pai >= min_num and pai <= max_num:
+                        self.list_pai.remove(pai)
+                        num_list.append(pai)
+                        break
+        else:
+            for one in three:
+                min_num = (one - 1) * 4 + 1 + 72
+                max_num = one + 4 + 72
+                for pai in self.list_pai:
+                    if pai >= min_num and pai <= max_num:
+                        self.list_pai.remove(pai)
+                        num_list.append(pai)
+                        break
+
+        return num_list
+
     def trible_charge(self):
+        self.print_pai()
         tong_pai = []
         tiao_pai = []
         wan_pai = []
@@ -77,9 +110,11 @@ class Client():
         hand_pai['tiao'] = tiao_pai
         hand_pai['wan'] = wan_pai
         key, three = self.make_policy_decision('exchange', hand_pai)
-        self.print_log(key, three)
+        self.print_pai_by_key(key, three)
+        num_list = self.reverse_by_key(key, three)
+        print(num_list)
 
-    def print_log(self, key, three):
+    def print_pai_by_key(self, key, three):
         out_str = ''
         three = [str(i) for i in three]
         if key == 'tong':
@@ -93,7 +128,7 @@ class Client():
             out_str += 'W'
         print(out_str)
 
-    def decide(self, list_pai=[]):
+    def print_pai(self, list_pai=[]):
         if not list_pai:
             list_pai = self.list_pai
         str_pai = ''
@@ -113,5 +148,5 @@ if __name__ == '__main__':
     client = Client()
     client.get_table()
     client.start()
-    client.decide()
+    # client.print_pai()
     client.trible_charge()
