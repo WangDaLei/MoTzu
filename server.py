@@ -1,6 +1,6 @@
 import tornado
 import MySQLdb
-from random import shuffle
+from random import shuffle, randint
 from tornado.netutil import bind_sockets
 from tornado.tcpserver import TCPServer
 from tornado.ioloop import IOLoop
@@ -14,6 +14,10 @@ class EchoServer(TCPServer):
         self.cursor = self.get_database_cursor()
         self.pai = {}
         self.left_pai = {}
+
+        self.table_turn_order = {}
+        self.table_turn_pai = {}
+        self.table_turn_status = {}
 
     def get_database_cursor(self):
         db = MySQLdb.connect("localhost", "root", "123456", "stock", charset='utf8')
@@ -85,6 +89,18 @@ class EchoServer(TCPServer):
         table_pais['4'] = num_4
         self.pai[table] = table_pais
 
+    def pop_card(self, table, num, pai_list):
+        for one in pai_list:
+            one = int(one)
+            if one in self.pai[str(table)][str(num)]:
+                self.pai[str(table)][str(num)].remove(one)
+            else:
+                print(str(one) + "is not in list")
+
+    def push_card(self, table, num, pai_list):
+        for one in pai_list:
+            self.pai[str(table)][str(num)].append(one)
+
     async def handle_stream(self, stream, address):
         while True:
             try:
@@ -109,6 +125,90 @@ class EchoServer(TCPServer):
                             await stream.write(bytes(pais, encoding="utf8"))
                         else:
                             await stream.write(bytes("401", encoding="utf8"))
+                    elif data_list[1] == '2':
+                        table = data_list[2]
+                        num = data_list[3]
+                        order = 0
+                        if str(table) in self.table_turn_order:
+                            order = self.table_turn_order[str(table)]
+                        else:
+                            rd = randint(1, 3)
+                            self.table_turn_order[str(table)] = rd
+                            order = rd
+                        if str(table) not in self.table_turn_pai:
+                            temp = {}
+                            temp[str(num)] = [data_list[4], data_list[5], data_list[6]]
+                            self.table_turn_pai[str(table)] = temp
+                        else:
+                            if str(num) not in self.table_turn_pai[str(table)]:
+                                self.table_turn_pai[str(table)][str(num)] = \
+                                    [data_list[4], data_list[5], data_list[6]]
+
+                            if len(self.table_turn_pai[str(table)]) == 4 and\
+                                (str(table) not in self.table_turn_status or
+                                 self.table_turn_status[str(table)] != 1):
+                                for one in self.table_turn_pai[str(table)]:
+                                    self.pop_card(
+                                        str(table), one, self.table_turn_pai[str(table)][one])
+                                if order == 1:
+                                    for one in self.table_turn_pai[str(table)]:
+                                        temp = int(one)
+                                        temp += 1
+                                        if temp == 5:
+                                            temp = 1
+                                        self.push_card(
+                                            str(table), str(temp),
+                                            self.table_turn_pai[str(table)][one])
+                                elif order == 2:
+                                    for one in self.table_turn_pai[str(table)]:
+                                        temp = int(one)
+                                        temp += 2
+                                        if temp > 4:
+                                            temp -= 4
+                                        self.push_card(
+                                            str(table), str(temp),
+                                            self.table_turn_pai[str(table)][one])
+                                else:
+                                    for one in self.table_turn_pai[str(table)]:
+                                        temp = int(one)
+                                        temp -= 1
+                                        if temp == 0:
+                                            temp += 4
+                                        self.push_card(
+                                            str(table), str(temp),
+                                            self.table_turn_pai[str(table)][one])
+                                self.table_turn_status[str(table)] = 1
+
+                        if str(table) not in self.table_turn_status or\
+                           self.table_turn_status[str(table)] != 1:
+                            await stream.write(bytes("402", encoding="utf8"))
+                        else:
+                            print("+++++++++++", order)
+                            print(self.pai[str(table)])
+                            if order == 1:
+                                temp = int(num)
+                                temp -= 1
+                                if temp == 0:
+                                    temp += 4
+                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = [str(one) for one in data_list]
+                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
+                            elif order == 2:
+                                temp = int(num)
+                                temp += 2
+                                if temp > 4:
+                                    temp -= 4
+                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = [str(one) for one in data_list]
+                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
+                            else:
+                                temp = int(num)
+                                temp += 1
+                                if temp > 4:
+                                    temp -= 4
+                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = [str(one) for one in data_list]
+                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
                     else:
                         pass
                     # await stream.write(bytes(str(table) + " " + str(num), encoding="utf8"))
