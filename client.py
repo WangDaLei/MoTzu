@@ -40,7 +40,7 @@ class Client():
                 self.list_pai = sorted(list_recv)
                 break
 
-    def choose_from_pai(self, pai_list):
+    def choose_three_from_pai(self, pai_list):
         rm_list = []
         for i in range(3):
             len_pai = len(pai_list)
@@ -55,7 +55,7 @@ class Client():
             # print(hand_pai)
             for key in range(len(hand_pai)):
                 if len(hand_pai[key][1]) >= 3:
-                    three = self.choose_from_pai(hand_pai[key][1])
+                    three = self.choose_three_from_pai(hand_pai[key][1])
                     return hand_pai[key][0], three
         else:
             pass
@@ -202,7 +202,6 @@ class Client():
         return True
 
     def check_normal_recursion(self, pai_list, jiang_sign):
-
         while True:
             if not pai_list:
                 return True, jiang_sign
@@ -247,25 +246,42 @@ class Client():
 
         jiang_sign = 0
         re, jiang_sign = self.check_normal_recursion(tong_pai, jiang_sign)
+        if not re:
+            return False
+        re, jiang_sign = self.check_normal_recursion(tiao_pai, jiang_sign)
+        if not re:
+            return False
+        re, jiang_sign = self.check_normal_recursion(wan_pai, jiang_sign)
+        if not re:
+            return False
+        return True
 
     def whether_win(self):
         re = self.whether_seven_couple()
         if re:
             return True
+        re = self.whether_normal()
+        if re:
+            return True
+        return False
+
+    def choose_from_pai():
+        pass
 
     def discard(self):
         re = self.whether_win()
         if re:
-            return True
-        # hand_pai = self.get_hand_pai_kind()
-        # tong_pai = hand_pai['tong']
-        # tiao_pai = hand_pai['tiao']
-        # wan_pai = hand_pai['wan']
+            return True, 0
+        else:
+            self.choose_from_pai()
+            return False, 1
 
     def play(self):
         while True:
             if len(self.list_pai) % 3 == 2:
-                self.discard()
+                re, pai = self.discard()
+                if re:
+                    pass
                 break
             else:
                 break
