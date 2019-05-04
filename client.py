@@ -265,24 +265,44 @@ class Client():
             return True
         return False
 
-    def choose_from_pai():
-        pass
+    def choose_from_pai(self):
+        lenth = len(self.list_pai)
+        rd = random.randint(1, lenth)
+        temp = self.list_pai[rd]
+        self.list_pai.remove(temp)
+        return temp
 
     def discard(self):
         re = self.whether_win()
         if re:
             return True, 0
         else:
-            self.choose_from_pai()
-            return False, 1
+            re = self.choose_from_pai()
+            return False, re
 
     def play(self):
         while True:
             if len(self.list_pai) % 3 == 2:
                 re, pai = self.discard()
                 if re:
-                    pass
-                break
+                    data = b'2 3 %b %b\n' % (str.encode(self.table), str.encode(self.num))
+                    self.cli.send(data)
+                    recv = self.cli.recv(1024)
+                    str_recv = str(recv, encoding="utf8")
+                    print(str_recv)
+                    if str_recv == '200':
+                        break
+                else:
+                    data = b'2 4 %b %b %s\n' % (
+                        str.encode(self.table), str.encode(self.num),
+                        str.encode(pai)
+                    )
+                    self.cli.send(data)
+                    recv = self.cli.recv(1024)
+                    str_recv = str(recv, encoding="utf8")
+                    print(str_recv)
+                    if str_recv == '201':
+                        break
             else:
                 break
 
