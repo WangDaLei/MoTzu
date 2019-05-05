@@ -17,19 +17,20 @@ class Client():
         cli.connect(("localhost", 8888))
         return cli
 
-    def get_table(self):
-        data = b"1 Hello World\n"
+    def apply_table_seat(self):
+        data = b"100\n"
 
         self.cli.send(data)
         recv = self.cli.recv(1024)
         str_recv = str(recv, encoding="utf8")
         print(str_recv)
-        self.table = str_recv.split(' ')[0]
-        self.num = str_recv.split(' ')[1]
+        self.table_number = str_recv.split(' ')[0]
+        self.table_seat_number = str_recv.split(' ')[1]
 
     def start(self):
         while True:
-            data = b'2 1 %b %b\n' % (str.encode(self.table), str.encode(self.num))
+            data = b'2 1 %b %b\n' % (
+                str.encode(self.table_number), str.encode(self.table_seat_number))
             self.cli.send(data)
             recv = self.cli.recv(1024)
             str_recv = str(recv, encoding="utf8")
@@ -123,7 +124,7 @@ class Client():
         print(num_list)
 
         data = b'2 2 %b %b %b %b %b\n' % (
-            str.encode(self.table), str.encode(self.num),
+            str.encode(self.table_number), str.encode(self.table_seat_number),
             str.encode(str(num_list[0])), str.encode(str(num_list[1])),
             str.encode(str(num_list[2]))
         )
@@ -285,7 +286,8 @@ class Client():
             if len(self.list_pai) % 3 == 2:
                 re, pai = self.discard()
                 if re:
-                    data = b'2 3 %b %b\n' % (str.encode(self.table), str.encode(self.num))
+                    data = b'2 3 %b %b\n' % (
+                        str.encode(self.table_number), str.encode(self.table_seat_number))
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
@@ -294,7 +296,7 @@ class Client():
                         break
                 else:
                     data = b'2 4 %b %b %s\n' % (
-                        str.encode(self.table), str.encode(self.num),
+                        str.encode(self.table_number), str.encode(self.table_seat_number),
                         str.encode(str(pai))
                     )
                     self.cli.send(data)
@@ -303,7 +305,7 @@ class Client():
                     print(str_recv)
             else:
                 data = b'2 5 %b %b\n' % (
-                    str.encode(self.table), str.encode(self.num)
+                    str.encode(self.table_number), str.encode(self.table_seat_number)
                 )
                 self.cli.send(data)
                 recv = self.cli.recv(1024)
@@ -318,7 +320,7 @@ class Client():
 
 if __name__ == '__main__':
     client = Client()
-    client.get_table()
+    client.apply_table_seat()
     client.start()
     # client.print_pai()
     client.trible_charge()

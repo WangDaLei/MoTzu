@@ -11,7 +11,7 @@ class EchoServer(TCPServer):
 
     def __init__(self):
         super(EchoServer, self).__init__()
-        self.cursor = self.get_database_cursor()
+        self.db, self.cursor = self.get_database_cursor()
         self.pai = {}
         self.left_pai = {}
 
@@ -27,7 +27,7 @@ class EchoServer(TCPServer):
     def get_database_cursor(self):
         db = MySQLdb.connect("localhost", "root", "123456", "stock", charset='utf8')
         cursor = db.cursor()
-        return cursor
+        return db, cursor
 
     def get_current_table(self):
         sql = "select * from majiang_config where name = 'table';"
@@ -54,19 +54,34 @@ class EchoServer(TCPServer):
         self.cursor.execute(sql)
 
     def apply_table(self):
-        table = self.get_current_table()
-        num = self.get_current_num()
-        temp1 = num
-        temp2 = table
-        if num == 4:
-            self.update_current_num(1)
-            self.update_current_table(table + 1)
-            temp1 = 1
-            temp2 += 1
-        else:
-            self.update_current_num(num + 1)
-            temp1 += 1
-        return temp1, temp2
+        sql_table = "select * from majiang_config where name = 'table' for update;"
+        sql_seat = "select * from majiang_config where name = 'count' for update;"
+        update_sql_table = "update majiang_config set value = '%s' where name = 'table'; "
+        update_sql_seat = "update majiang_config set value = '%s' where name = 'count'; "
+
+        cursor = self.db.cursor()
+
+        table_num = 0
+        seat_num = 0
+        try:
+            cursor.execute("set autocommit=0;")
+            cursor.execute(sql_table)
+            table_num = cursor.fetchone()[2]
+            cursor.execute(sql_seat)
+            seat_num = cursor.fetchone()[2]
+            if seat_num == 4:
+                cursor.execute(update_sql_table % (table_num + 1))
+                cursor.execute(update_sql_seat % (1))
+                seat_num = 1
+                table_num += 1
+            else:
+                cursor.execute(update_sql_seat % (seat_num + 1))
+                seat_num += 1
+            self.db.commit()
+        except Exception as e:
+            print(e)
+            self.db.rollback()
+        return table_num, seat_num
 
     def deal_cards(self, table):
         table = str(table)
@@ -115,12 +130,16 @@ class EchoServer(TCPServer):
                 data = await stream.read_until(b"\n")
                 data_str = str(data, encoding="utf8")
                 data_list = data_str.strip().split(' ')
-                print(data_list)
-                if data_list[0] == '1':
-                    temp1, temp2 = self.apply_table()
-                    if temp1 == 4:
-                        self.deal_cards(temp2)
-                    await stream.write(bytes(str(temp2) + " " + str(temp1), encoding="utf8"))
+
+                if data_list[0] == '100':
+                    table_number, seat_number = self.apply_table()
+                    if seat_number == 4:
+                        self.deal_cards(table_number)
+                    await stream.write(
+                        bytes(
+                            str(table_number) + " " + str(seat_number), encoding="utf8"
+                        )
+                    )
                 elif data_list[0] == '2':
                     if data_list[1] == '1':
                         table = data_list[2]
