@@ -19,6 +19,11 @@ class EchoServer(TCPServer):
         self.table_turn_pai = {}
         self.table_turn_status = {}
 
+        self.table_last_hand = {}
+        self.table_last_hand_status = {}
+
+        self.table_last_turn = {}
+
     def get_database_cursor(self):
         db = MySQLdb.connect("localhost", "root", "123456", "stock", charset='utf8')
         cursor = db.cursor()
@@ -88,6 +93,9 @@ class EchoServer(TCPServer):
         table_pais['3'] = num_3
         table_pais['4'] = num_4
         self.pai[table] = table_pais
+        self.table_last_turn[table] = 1
+        tmp = [2, 3, 4]
+        self.table_last_hand_status[str(table)] = tmp
 
     def pop_card(self, table, num, pai_list):
         for one in pai_list:
@@ -99,7 +107,7 @@ class EchoServer(TCPServer):
 
     def push_card(self, table, num, pai_list):
         for one in pai_list:
-            self.pai[str(table)][str(num)].append(one)
+            self.pai[str(table)][str(num)].append(int(one))
 
     async def handle_stream(self, stream, address):
         while True:
@@ -209,9 +217,65 @@ class EchoServer(TCPServer):
                                 data_list = self.table_turn_pai[str(table)][str(temp)]
                                 data_list = [str(one) for one in data_list]
                                 await stream.write(bytes(','.join(data_list), encoding="utf8"))
+                    elif data_list[1] == '3':
+                        table = data_list[2]
+                        num = data_list[3]
+                        print(table, num)
+                        # check
+                        await stream.write(bytes("200", encoding="utf8"))
+                        # else:
+                        # await stream.write(bytes("210", encoding="utf8"))
+                    elif data_list[1] == '4':
+                        table = data_list[2]
+                        num = data_list[3]
+                        pai = int(data_list[4])
+                        print("-------------")
+                        print(self.pai[str(table)][str(num)])
+                        print(pai)
+                        print(type(pai))
+                        print(pai in self.pai[str(table)][str(num)])
+                        self.pai[str(table)][str(num)].remove(pai)
+                        self.table_last_hand[str(table)] = pai
+                        num = int(num)
+                        tmp = [1, 2, 3, 4]
+                        tmp.remove(num)
+                        self.table_last_hand_status[str(table)] = tmp
+                        await stream.write(bytes("201", encoding="utf8"))
+                    elif data_list[1] == '5':
+                        table = data_list[2]
+                        num = data_list[3]
+                        print("+++++++")
+                        print(len(self.left_pai[str(table)]))
+                        print(self.table_last_hand_status)
+                        print(self.table_last_hand_status[str(table)])
+                        if len(self.table_last_hand_status[str(table)]) == 0:
+                            if len(self.left_pai[str(table)]) == 0:
+                                await stream.write(bytes("203", encoding="utf8"))
+                            else:
+                                pai = self.left_pai[str(table)][0]
+                                self.left_pai[str(table)] = self.left_pai[str(table)][1:]
+                                self.table_last_turn[str(table)] += 1
+                                if self.table_last_turn[str(table)] == 5:
+                                    self.table_last_turn[str(table)] = 1
+                                num = int(num)
+                                if num == self.table_last_turn[str(table)]:
+                                    await stream.write(bytes("206 " + str(pai), encoding="utf8"))
+                                else:
+                                    await stream.write(bytes("202", encoding="utf8"))
+                        else:
+                            num = int(num)
+                            print("++++++")
+                            print(len(self.left_pai[str(table)]))
+                            print(self.table_last_hand_status[str(table)])
+                            if num in self.table_last_hand_status[str(table)] and\
+                               str(table) in self.table_last_hand:
+                                pai = self.table_last_hand[str(table)]
+                                self.table_last_hand_status[str(table)].remove(num)
+                                await stream.write(bytes("205 " + str(pai), encoding="utf8"))
+                            else:
+                                await stream.write(bytes("202", encoding="utf8"))
                     else:
                         pass
-                    # await stream.write(bytes(str(table) + " " + str(num), encoding="utf8"))
                 else:
                     pass
             except StreamClosedError:

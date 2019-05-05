@@ -268,7 +268,7 @@ class Client():
     def choose_from_pai(self):
         lenth = len(self.list_pai)
         rd = random.randint(1, lenth)
-        temp = self.list_pai[rd]
+        temp = self.list_pai[rd - 1]
         self.list_pai.remove(temp)
         return temp
 
@@ -295,16 +295,25 @@ class Client():
                 else:
                     data = b'2 4 %b %b %s\n' % (
                         str.encode(self.table), str.encode(self.num),
-                        str.encode(pai)
+                        str.encode(str(pai))
                     )
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
                     print(str_recv)
-                    if str_recv == '201':
-                        break
             else:
-                break
+                data = b'2 5 %b %b\n' % (
+                    str.encode(self.table), str.encode(self.num)
+                )
+                self.cli.send(data)
+                recv = self.cli.recv(1024)
+                str_recv = str(recv, encoding="utf8")
+                if str_recv == '202':
+                    time.sleep(1)
+                elif str_recv == '203':
+                    break
+                else:
+                    print(str_recv)
 
 
 if __name__ == '__main__':
