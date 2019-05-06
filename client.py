@@ -29,14 +29,17 @@ class Client():
 
     def start(self):
         while True:
+            print("+-+-+-+-+-+")
             data = b'2 1 %b %b\n' % (
                 str.encode(self.table_number), str.encode(self.table_seat_number))
             self.cli.send(data)
             recv = self.cli.recv(1024)
             str_recv = str(recv, encoding="utf8")
+            print(str_recv)
             if str_recv == '401':
                 time.sleep(1)
             else:
+                print('-----', str_recv)
                 list_recv = json.loads(str_recv)
                 self.list_pai = sorted(list_recv)
                 break

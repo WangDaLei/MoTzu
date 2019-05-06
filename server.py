@@ -12,8 +12,9 @@ class EchoServer(TCPServer):
     def __init__(self):
         super(EchoServer, self).__init__()
         self.db, self.cursor = self.get_database_cursor()
-        self.pai = {}
-        self.left_pai = {}
+
+        self.cards = {}
+        self.left_cards = {}
 
         self.table_turn_order = {}
         self.table_turn_pai = {}
@@ -30,28 +31,19 @@ class EchoServer(TCPServer):
         return db, cursor
 
     def get_current_table(self):
-        sql = "select * from majiang_config where name = 'table';"
+        sql = "select * from majiang_config where name = 'table' limit 1;"
         self.cursor.execute(sql)
         table = self.cursor.fetchone()[2]
+        self.db.commit()
         return table
 
     def get_current_num(self):
-        sql = "select * from majiang_config where name = 'count';"
+        sql = "select * from majiang_config where name = 'count' limit 1;"
         self.cursor.execute(sql)
         num = self.cursor.fetchone()[2]
+        print("+++++", num)
+        self.db.commit()
         return num
-
-    def update_current_table(self, value):
-        sql = "lock table majiang_config write; " +\
-              "update majiang_config set value = '%s' where name = 'table'; " % (value) +\
-            "unlock tables;"
-        self.cursor.execute(sql)
-
-    def update_current_num(self, value):
-        sql = "lock table majiang_config write; " +\
-              "update majiang_config set value = '%s' where name = 'count'; " % (value) +\
-              "unlock tables;"
-        self.cursor.execute(sql)
 
     def apply_table(self):
         sql_table = "select * from majiang_config where name = 'table' for update;"
@@ -60,7 +52,6 @@ class EchoServer(TCPServer):
         update_sql_seat = "update majiang_config set value = '%s' where name = 'count'; "
 
         cursor = self.db.cursor()
-
         table_num = 0
         seat_num = 0
         try:
@@ -83,46 +74,35 @@ class EchoServer(TCPServer):
             self.db.rollback()
         return table_num, seat_num
 
-    def deal_cards(self, table):
-        table = str(table)
-        pais = [i + 1 for i in range(108)]
-        shuffle(pais)
-        num_1 = []
-        num_2 = []
-        num_3 = []
-        num_4 = []
+    def shuffle_cards(self, table_number):
+        # 洗牌并给客户端分发初始的牌
+        table = str(table_number)
+
+        cards_list = [i + 1 for i in range(108)]
+        shuffle(cards_list)
+
+        self.cards[table] = {}
+        for i in range(4):
+            self.cards[table][str(i + 1)] = []
+
         for i in range(53):
-            if i % 4 == 0:
-                num_1.append(pais[i])
-            elif i % 4 == 1:
-                num_2.append(pais[i])
-            elif i % 4 == 2:
-                num_3.append(pais[i])
-            else:
-                num_4.append(pais[i])
-        left_pai = pais[53:]
-        self.left_pai[table] = left_pai
-        table_pais = {}
-        table_pais['1'] = num_1
-        table_pais['2'] = num_2
-        table_pais['3'] = num_3
-        table_pais['4'] = num_4
-        self.pai[table] = table_pais
+            self.cards[table][str(i % 4 + 1)].append(cards_list[i])
+
+        self.left_cards[table] = cards_list[53:]
         self.table_last_turn[table] = 1
-        tmp = [2, 3, 4]
-        self.table_last_hand_status[str(table)] = tmp
+        self.table_last_hand_status[str(table)] = [2, 3, 4]
 
     def pop_card(self, table, num, pai_list):
         for one in pai_list:
             one = int(one)
-            if one in self.pai[str(table)][str(num)]:
-                self.pai[str(table)][str(num)].remove(one)
+            if one in self.cards[str(table)][str(num)]:
+                self.cards[str(table)][str(num)].remove(one)
             else:
                 print(str(one) + "is not in list")
 
     def push_card(self, table, num, pai_list):
         for one in pai_list:
-            self.pai[str(table)][str(num)].append(int(one))
+            self.cards[str(table)][str(num)].append(int(one))
 
     async def handle_stream(self, stream, address):
         while True:
@@ -132,9 +112,10 @@ class EchoServer(TCPServer):
                 data_list = data_str.strip().split(' ')
 
                 if data_list[0] == '100':
+                    # 申请桌号的位置, 随机洗牌
                     table_number, seat_number = self.apply_table()
                     if seat_number == 4:
-                        self.deal_cards(table_number)
+                        self.shuffle_cards(table_number)
                     await stream.write(
                         bytes(
                             str(table_number) + " " + str(seat_number), encoding="utf8"
@@ -146,12 +127,19 @@ class EchoServer(TCPServer):
                         num = data_list[3]
                         current_table = self.get_current_table()
                         current_num = self.get_current_num()
-                        if current_table > int(table) or \
-                           (current_table == int(table) and current_num == 4):
-                            pais = str(self.pai[str(table)][str(num)])
-                            await stream.write(bytes(pais, encoding="utf8"))
-                        else:
+                        print(table)
+                        print(num)
+                        print(str(table) not in self.cards)
+                        print(self.cards)
+                        if str(table) not in self.cards:
                             await stream.write(bytes("401", encoding="utf8"))
+                        else:
+                            if current_table > int(table) or \
+                               (current_table == int(table) and current_num == 4):
+                                cards = str(self.cards[str(table)][str(num)])
+                                await stream.write(bytes(cards, encoding="utf8"))
+                            else:
+                                await stream.write(bytes("401", encoding="utf8"))
                     elif data_list[1] == '2':
                         table = data_list[2]
                         num = data_list[3]
@@ -211,7 +199,7 @@ class EchoServer(TCPServer):
                             await stream.write(bytes("402", encoding="utf8"))
                         else:
                             print("+++++++++++", order)
-                            print(self.pai[str(table)])
+                            print(self.cards[str(table)])
                             if order == 1:
                                 temp = int(num)
                                 temp -= 1
@@ -249,11 +237,11 @@ class EchoServer(TCPServer):
                         num = data_list[3]
                         pai = int(data_list[4])
                         print("-------------")
-                        print(self.pai[str(table)][str(num)])
+                        print(self.cards[str(table)][str(num)])
                         print(pai)
                         print(type(pai))
-                        print(pai in self.pai[str(table)][str(num)])
-                        self.pai[str(table)][str(num)].remove(pai)
+                        print(pai in self.cards[str(table)][str(num)])
+                        self.cards[str(table)][str(num)].remove(pai)
                         self.table_last_hand[str(table)] = pai
                         num = int(num)
                         tmp = [1, 2, 3, 4]
@@ -264,15 +252,15 @@ class EchoServer(TCPServer):
                         table = data_list[2]
                         num = data_list[3]
                         print("+++++++")
-                        print(len(self.left_pai[str(table)]))
+                        print(len(self.left_cards[str(table)]))
                         print(self.table_last_hand_status)
                         print(self.table_last_hand_status[str(table)])
                         if len(self.table_last_hand_status[str(table)]) == 0:
-                            if len(self.left_pai[str(table)]) == 0:
+                            if len(self.left_cards[str(table)]) == 0:
                                 await stream.write(bytes("203", encoding="utf8"))
                             else:
-                                pai = self.left_pai[str(table)][0]
-                                self.left_pai[str(table)] = self.left_pai[str(table)][1:]
+                                pai = self.left_cards[str(table)][0]
+                                self.left_cards[str(table)] = self.left_cards[str(table)][1:]
                                 self.table_last_turn[str(table)] += 1
                                 if self.table_last_turn[str(table)] == 5:
                                     self.table_last_turn[str(table)] = 1
@@ -284,7 +272,7 @@ class EchoServer(TCPServer):
                         else:
                             num = int(num)
                             print("++++++")
-                            print(len(self.left_pai[str(table)]))
+                            print(len(self.left_cards[str(table)]))
                             print(self.table_last_hand_status[str(table)])
                             if num in self.table_last_hand_status[str(table)] and\
                                str(table) in self.table_last_hand:
