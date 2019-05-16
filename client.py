@@ -39,7 +39,6 @@ class Client():
             if str_recv == '401':
                 time.sleep(1)
             else:
-                print('-----', str_recv)
                 list_recv = json.loads(str_recv)
                 self.list_pai = sorted(list_recv)
                 break
@@ -56,7 +55,6 @@ class Client():
     def make_policy_decision(self, policy_type, hand_pai):
         if policy_type == 'exchange':
             hand_pai = sorted(hand_pai.items(), key=lambda item: len(item[1]))
-            # print(hand_pai)
             for key in range(len(hand_pai)):
                 if len(hand_pai[key][1]) >= 3:
                     three = self.choose_three_from_pai(hand_pai[key][1])
@@ -124,7 +122,6 @@ class Client():
         key, three = self.make_policy_decision('exchange', hand_pai)
         self.print_pai_by_key(key, three)
         num_list = self.reverse_by_key(key, three)
-        print(num_list)
 
         data = b'2 2 %b %b %b %b %b\n' % (
             str.encode(self.table_number), str.encode(self.table_seat_number),
@@ -138,12 +135,10 @@ class Client():
             if str_recv == '402':
                 time.sleep(1)
             else:
-                print(str_recv)
                 num_list = str_recv.split(',')
                 for one in num_list:
                     self.list_pai.append(int(one))
                 self.print_pai()
-                print(sorted(self.list_pai))
                 break
 
     def print_pai_by_key(self, key, three):
@@ -294,7 +289,6 @@ class Client():
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
-                    print(str_recv)
                     if str_recv == '200':
                         break
                 else:
@@ -305,7 +299,6 @@ class Client():
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
-                    print(str_recv)
             else:
                 data = b'2 5 %b %b\n' % (
                     str.encode(self.table_number), str.encode(self.table_seat_number)
@@ -325,6 +318,5 @@ if __name__ == '__main__':
     client = Client()
     client.apply_table_seat()
     client.start()
-    # client.print_pai()
     client.trible_charge()
     client.play()

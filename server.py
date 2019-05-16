@@ -1,5 +1,7 @@
 import tornado
 import MySQLdb
+import redis
+import json
 from random import shuffle, randint
 from tornado.netutil import bind_sockets
 from tornado.tcpserver import TCPServer
@@ -12,18 +14,14 @@ class EchoServer(TCPServer):
     def __init__(self):
         super(EchoServer, self).__init__()
         self.db, self.cursor = self.get_database_cursor()
+        self.redis = self.get_redis_connection()
 
-        self.cards = {}
-        self.left_cards = {}
-
-        self.table_turn_order = {}
-        self.table_turn_pai = {}
-        self.table_turn_status = {}
-
-        self.table_last_hand = {}
-        self.table_last_hand_status = {}
-
-        self.table_last_turn = {}
+    def get_redis_connection(self):
+        pool = redis.ConnectionPool(
+            host='127.0.0.1', port=6379
+        )
+        r = redis.Redis(connection_pool=pool)
+        return r
 
     def get_database_cursor(self):
         db = MySQLdb.connect("localhost", "root", "123456", "stock", charset='utf8')
@@ -41,7 +39,6 @@ class EchoServer(TCPServer):
         sql = "select * from majiang_config where name = 'count' limit 1;"
         self.cursor.execute(sql)
         num = self.cursor.fetchone()[2]
-        print("+++++", num)
         self.db.commit()
         return num
 
@@ -81,28 +78,40 @@ class EchoServer(TCPServer):
         cards_list = [i + 1 for i in range(108)]
         shuffle(cards_list)
 
-        self.cards[table] = {}
+        self.redis.hset('cards', table, json.dumps({}))
+        # self.cards[table] = {}
         for i in range(4):
-            self.cards[table][str(i + 1)] = []
+            cards = json.loads(self.redis.hget('cards', table))
+            cards[str(i + 1)] = []
+            self.redis.hset('cards', table, json.dumps(cards))
+            # self.cards[table][str(i + 1)] = []
 
         for i in range(53):
-            self.cards[table][str(i % 4 + 1)].append(cards_list[i])
+            cards = json.loads(self.redis.hget('cards', table))
+            cards[str(i % 4 + 1)].append(cards_list[i])
+            self.redis.hset('cards', table, json.dumps(cards))
+            # self.cards[table][str(i % 4 + 1)].append(cards_list[i])
 
-        self.left_cards[table] = cards_list[53:]
-        self.table_last_turn[table] = 1
-        self.table_last_hand_status[str(table)] = [2, 3, 4]
+        self.redis.hset('left_cards', table, json.dumps(cards_list[53:]))
+        self.redis.hset('table_last_turn', table, json.dumps(1))
+        self.redis.hset('table_last_turn', table, json.dumps([2, 3, 4]))
+        # self.table_last_hand_status[str(table)] = [2, 3, 4]
 
     def pop_card(self, table, num, pai_list):
         for one in pai_list:
             one = int(one)
-            if one in self.cards[str(table)][str(num)]:
-                self.cards[str(table)][str(num)].remove(one)
+            cards = json.loads(self.redis.hget('cards', str(table)))
+            if one in cards[str(num)]:
+                cards[str(num)].remove(one)
+                self.redis.hset('cards', str(table), json.dumps(cards))
             else:
                 print(str(one) + "is not in list")
 
     def push_card(self, table, num, pai_list):
+        cards = json.loads(self.redis.hget('cards', str(table)))
         for one in pai_list:
-            self.cards[str(table)][str(num)].append(int(one))
+            cards[str(num)].append(int(one))
+        self.redis.hset('cards', str(table), json.dumps(cards))
 
     async def handle_stream(self, stream, address):
         while True:
@@ -127,16 +136,14 @@ class EchoServer(TCPServer):
                         num = data_list[3]
                         current_table = self.get_current_table()
                         current_num = self.get_current_num()
-                        print(table)
-                        print(num)
-                        print(str(table) not in self.cards)
-                        print(self.cards)
-                        if str(table) not in self.cards:
+                        cards = self.redis.hget('cards', table)
+                        if not cards:
                             await stream.write(bytes("401", encoding="utf8"))
                         else:
+                            cards = json.loads(cards)
                             if current_table > int(table) or \
                                (current_table == int(table) and current_num == 4):
-                                cards = str(self.cards[str(table)][str(num)])
+                                cards = str(cards[str(num)])
                                 await stream.write(bytes(cards, encoding="utf8"))
                             else:
                                 await stream.write(bytes("401", encoding="utf8"))
@@ -144,68 +151,72 @@ class EchoServer(TCPServer):
                         table = data_list[2]
                         num = data_list[3]
                         order = 0
-                        if str(table) in self.table_turn_order:
-                            order = self.table_turn_order[str(table)]
+                        table_turn_order = self.redis.hget('table_turn_order', table)
+                        table_turn_pai = self.redis.hget('table_turn_pai', table)
+                        table_turn_status = self.redis.hget('table_turn_status', table)
+
+                        if table_turn_order:
+                            order = table_turn_order
                         else:
                             rd = randint(1, 3)
-                            self.table_turn_order[str(table)] = rd
+                            self.redis.hset('table_turn_order', table, rd)
                             order = rd
-                        if str(table) not in self.table_turn_pai:
+                        if not table_turn_pai:
                             temp = {}
                             temp[str(num)] = [data_list[4], data_list[5], data_list[6]]
-                            self.table_turn_pai[str(table)] = temp
+                            self.redis.hset('table_turn_pai', table, json.dumps(temp))
                         else:
-                            if str(num) not in self.table_turn_pai[str(table)]:
-                                self.table_turn_pai[str(table)][str(num)] = \
-                                    [data_list[4], data_list[5], data_list[6]]
+                            table_turn_pai = json.loads(table_turn_pai)
+                            if str(num) not in table_turn_pai:
+                                temp = {str(num): [data_list[4], data_list[5], data_list[6]]}
+                                self.redis.hset('table_turn_pai', table, json.dumps(temp))
 
-                            if len(self.table_turn_pai[str(table)]) == 4 and\
-                                (str(table) not in self.table_turn_status or
-                                 self.table_turn_status[str(table)] != 1):
-                                for one in self.table_turn_pai[str(table)]:
+                            if len(table_turn_pai) == 4 and\
+                                (not table_turn_status or
+                                 json.loads(table_turn_status) != 1):
+                                for one in table_turn_pai:
                                     self.pop_card(
-                                        str(table), one, self.table_turn_pai[str(table)][one])
+                                        str(table), one, table_turn_pai[one])
                                 if order == 1:
-                                    for one in self.table_turn_pai[str(table)]:
+                                    for one in table_turn_pai:
                                         temp = int(one)
                                         temp += 1
                                         if temp == 5:
                                             temp = 1
                                         self.push_card(
                                             str(table), str(temp),
-                                            self.table_turn_pai[str(table)][one])
+                                            table_turn_pai[one])
                                 elif order == 2:
-                                    for one in self.table_turn_pai[str(table)]:
+                                    for one in table_turn_pai:
                                         temp = int(one)
                                         temp += 2
                                         if temp > 4:
                                             temp -= 4
                                         self.push_card(
                                             str(table), str(temp),
-                                            self.table_turn_pai[str(table)][one])
+                                            table_turn_pai[one])
                                 else:
-                                    for one in self.table_turn_pai[str(table)]:
+                                    for one in table_turn_pai:
                                         temp = int(one)
                                         temp -= 1
                                         if temp == 0:
                                             temp += 4
                                         self.push_card(
                                             str(table), str(temp),
-                                            self.table_turn_pai[str(table)][one])
-                                self.table_turn_status[str(table)] = 1
+                                            table_turn_pai[one])
+                                self.redis.hset('table_turn_status', table, json.dumps(1))
+                                # self.table_turn_status[str(table)] = 1
 
-                        if str(table) not in self.table_turn_status or\
-                           self.table_turn_status[str(table)] != 1:
+                        if not table_turn_status or\
+                           json.loads(table_turn_status) != 1:
                             await stream.write(bytes("402", encoding="utf8"))
                         else:
-                            print("+++++++++++", order)
-                            print(self.cards[str(table)])
                             if order == 1:
                                 temp = int(num)
                                 temp -= 1
                                 if temp == 0:
                                     temp += 4
-                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = table_turn_pai[str(temp)]
                                 data_list = [str(one) for one in data_list]
                                 await stream.write(bytes(','.join(data_list), encoding="utf8"))
                             elif order == 2:
@@ -213,7 +224,7 @@ class EchoServer(TCPServer):
                                 temp += 2
                                 if temp > 4:
                                     temp -= 4
-                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = table_turn_pai[str(temp)]
                                 data_list = [str(one) for one in data_list]
                                 await stream.write(bytes(','.join(data_list), encoding="utf8"))
                             else:
@@ -221,63 +232,63 @@ class EchoServer(TCPServer):
                                 temp += 1
                                 if temp > 4:
                                     temp -= 4
-                                data_list = self.table_turn_pai[str(table)][str(temp)]
+                                data_list = table_turn_pai[str(temp)]
                                 data_list = [str(one) for one in data_list]
                                 await stream.write(bytes(','.join(data_list), encoding="utf8"))
                     elif data_list[1] == '3':
                         table = data_list[2]
                         num = data_list[3]
-                        print(table, num)
-                        # check
                         await stream.write(bytes("200", encoding="utf8"))
-                        # else:
-                        # await stream.write(bytes("210", encoding="utf8"))
                     elif data_list[1] == '4':
                         table = data_list[2]
                         num = data_list[3]
                         pai = int(data_list[4])
-                        print("-------------")
-                        print(self.cards[str(table)][str(num)])
-                        print(pai)
-                        print(type(pai))
-                        print(pai in self.cards[str(table)][str(num)])
-                        self.cards[str(table)][str(num)].remove(pai)
-                        self.table_last_hand[str(table)] = pai
+                        cards = json.loads(self.redis.hget('cards', table))
+                        cards[str(num)].remove(pai)
+                        self.redis.hset('cards', table, json.dumps(cards))
+                        self.redis.hset('table_last_hand', table, json.dumps(pai))
                         num = int(num)
                         tmp = [1, 2, 3, 4]
                         tmp.remove(num)
-                        self.table_last_hand_status[str(table)] = tmp
+                        self.redis.hset('table_last_hand_status', table, json.dumps(tmp))
                         await stream.write(bytes("201", encoding="utf8"))
                     elif data_list[1] == '5':
                         table = data_list[2]
                         num = data_list[3]
-                        print("+++++++")
-                        print(len(self.left_cards[str(table)]))
-                        print(self.table_last_hand_status)
-                        print(self.table_last_hand_status[str(table)])
-                        if len(self.table_last_hand_status[str(table)]) == 0:
-                            if len(self.left_cards[str(table)]) == 0:
+                        left_cards = self.redis.hget('left_cards', table)
+                        table_last_hand_status = self.redis.hget('table_last_hand_status', table)
+                        if not table_last_hand_status:
+                            if not left_cards:
                                 await stream.write(bytes("203", encoding="utf8"))
                             else:
-                                pai = self.left_cards[str(table)][0]
-                                self.left_cards[str(table)] = self.left_cards[str(table)][1:]
-                                self.table_last_turn[str(table)] += 1
-                                if self.table_last_turn[str(table)] == 5:
-                                    self.table_last_turn[str(table)] = 1
+                                left_cards = json.loads(left_cards)
+                                pai = left_cards[0]
+                                left_cards = left_cards[1:]
+                                table_last_turn = json.loads(
+                                    self.redis.hget('table_last_turn', table))
+                                table_last_turn += 1
+                                if table_last_turn == 5:
+                                    table_last_turn = 1
+                                    self.redis.hset('table_last_turn', table, json.dumps(1))
                                 num = int(num)
-                                if num == self.table_last_turn[str(table)]:
+                                if num == table_last_turn:
                                     await stream.write(bytes("206 " + str(pai), encoding="utf8"))
                                 else:
                                     await stream.write(bytes("202", encoding="utf8"))
                         else:
                             num = int(num)
-                            print("++++++")
-                            print(len(self.left_cards[str(table)]))
-                            print(self.table_last_hand_status[str(table)])
-                            if num in self.table_last_hand_status[str(table)] and\
-                               str(table) in self.table_last_hand:
-                                pai = self.table_last_hand[str(table)]
-                                self.table_last_hand_status[str(table)].remove(num)
+                            table_last_hand_status = self.redis.hget(
+                                'table_last_hand_status', table)
+                            table_last_hand = self.json.loads(
+                                self.redis.hget('table_last_hand', table))
+                            if table_last_hand_status and num in json.loads(table_last_hand_status)\
+                               and not table_last_hand:
+                                table_last_hand = json.loads(table_last_hand)
+                                table_last_hand_status = json.loads(table_last_hand_status)
+                                pai = table_last_hand
+                                table_last_hand_status.remove(num)
+                                self.redis.hset('table_last_hand_status', table, json.dumps(
+                                    table_last_hand_status))
                                 await stream.write(bytes("205 " + str(pai), encoding="utf8"))
                             else:
                                 await stream.write(bytes("202", encoding="utf8"))
