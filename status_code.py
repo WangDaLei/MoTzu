@@ -1,0 +1,2 @@
+
+STATUS_NEW_GAME = '100'

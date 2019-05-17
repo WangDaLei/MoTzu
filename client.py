@@ -4,6 +4,7 @@ import json
 import time
 import random
 from socket import socket, AF_INET, SOCK_STREAM
+from status_code import STATUS_NEW_GAME
 
 
 class Client():
@@ -18,7 +19,7 @@ class Client():
         return cli
 
     def apply_table_seat(self):
-        data = b"100\n"
+        data = b"%b\n" % str.encode(STATUS_NEW_GAME)
 
         self.cli.send(data)
         recv = self.cli.recv(1024)
