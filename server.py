@@ -7,7 +7,22 @@ from tornado.netutil import bind_sockets
 from tornado.tcpserver import TCPServer
 from tornado.ioloop import IOLoop
 from tornado.iostream import StreamClosedError
-from status_code import STATUS_NEW_GAME
+from status_code import (
+    STATUS_NEW_GAME,
+    STATUS_GAME_OVER,
+    STATUS_GET_INIT_CARDS,
+    STATUS_EXCHANGE_CARDS,
+    STATUS_PLAY_CARD,
+    STATUS_GET_CARD,
+    STATUS_WAIT_FOR_INIT_CARDS,
+    STATUS_WAIT_FOR_EXCHANGE_CARDS,
+    STATUS_WAIT_FOR_GET_CARD,
+    RESPONSE_GAME_OVER,
+    RESPONSE_GAME_OVER_NO_CARD,
+    RESPONSE_PLAY_CARD,
+    RESPONSE_GET_SELF_CARD,
+    RESPONSE_GET_OTHER_CARD
+)
 
 
 class EchoServer(TCPServer):
@@ -98,11 +113,12 @@ class EchoServer(TCPServer):
 
         self.hset_redis('cards', table, cards)
         self.hset_redis('left_cards', table, cards_list[53:])
+        # self.hset_redis('table_last_turn', table, 1)
         self.hset_redis('table_last_hand', table, 1)
-        self.hset_redis('table_last_turn', table, [2, 3, 4])
+        self.hset_redis('table_last_hand_status', table, [2, 3, 4])
 
-    def pop_card(self, table, num, pai_list):
-        for one in pai_list:
+    def pop_card(self, table, num, card_list):
+        for one in card_list:
             one = int(one)
             cards = self.hget_redis('cards', str(table))
             if one in cards[str(num)]:
@@ -111,11 +127,143 @@ class EchoServer(TCPServer):
             else:
                 print(str(one) + "is not in list")
 
-    def push_card(self, table, num, pai_list):
+    def push_card(self, table, num, card_list):
         cards = self.hget_redis('cards', str(table))
-        for one in pai_list:
+        for one in card_list:
             cards[str(num)].append(int(one))
         self.hset_redis('cards', str(table), cards)
+
+    def exchange_cards(self, table, table_exchange_cards, exchange_mode):
+        for one in table_exchange_cards:
+            self.pop_card(str(table), one, table_exchange_cards[one])
+
+        for one in table_exchange_cards:
+            exchange_num = (int(one) + exchange_mode) % 4
+            if exchange_num == 0:
+                exchange_num = 4
+            self.push_card(str(table), str(exchange_num), table_exchange_cards[one])
+
+        self.hset_redis('table_exchange_status', table, 1)
+
+    def response_shuffle_cards(self, stream):
+        table_number, seat_number = self.apply_table()
+        if seat_number == 4:
+            self.shuffle_cards(table_number)
+        await stream.write(
+            bytes(
+                str(table_number) + " " + str(seat_number),
+                encoding="utf8"
+            )
+        )
+
+    def response_init_cards(self, stream, data_list):
+        table = data_list[1]
+        num = data_list[2]
+        current_table = self.get_current_table()
+        current_num = self.get_current_num()
+        cards = self.hget_redis('cards', table)
+        if not cards:
+            await stream.write(
+                bytes(STATUS_WAIT_FOR_INIT_CARDS, encoding="utf8")
+            )
+        else:
+            if current_table > int(table) or \
+               (current_table == int(table) and current_num == 4):
+                cards = str(cards[str(num)])
+                await stream.write(bytes(cards, encoding="utf8"))
+            else:
+                await stream.write(
+                    bytes(STATUS_WAIT_FOR_INIT_CARDS, encoding="utf8")
+                )
+
+    def response_exchange_cards(self, stream, data_list):
+        table = data_list[1]
+        num = data_list[2]
+
+        exchange_mode = 0
+        table_exchange_mode = self.hget_redis('table_exchange_mode', table)
+        table_exchange_cards = self.hget_redis('table_exchange_cards', table)
+        table_exchange_status = self.hget_redis('table_exchange_status', table)
+
+        if table_exchange_mode:
+            exchange_mode = table_exchange_mode
+        else:
+            exchange_mode = randint(1, 3)
+            self.hset_redis('table_exchange_mode', table, exchange_mode)
+
+        if not table_exchange_cards:
+            table_exchange_cards = {}
+            table_exchange_cards[str(num)] = [data_list[i + 3] for i in range(3)]
+            self.hset_redis('table_exchange_cards', table, table_exchange_cards)
+
+        else:
+            if str(num) not in table_exchange_cards:
+                table_exchange_cards[str(num)] = [data_list[i + 3] for i in range(3)]
+                self.hset_redis('table_exchange_cards', table, table_exchange_cards)
+
+            if len(table_exchange_cards) == 4 and table_exchange_status != 1:
+                self.exchange_cards(table, table_exchange_cards, exchange_mode)
+
+        if table_exchange_status != 1:
+            await stream.write(bytes(STATUS_WAIT_FOR_EXCHANGE_CARDS, encoding="utf8"))
+
+        else:
+            exchange_num = (int(num) + 4 - exchange_mode) % 4
+            if exchange_num == 0:
+                exchange_num = 4
+            exchang_list = table_exchange_cards(str(exchange_num))
+            exchang_list = [str(one) for one in exchang_list]
+            await stream.write(bytes(','.join(exchang_list), encoding="utf8"))
+
+    def response_play_card(self, stream, data_list):
+        table = data_list[1]
+        num = data_list[2]
+        card = int(data_list[3])
+        cards = self.hget_redis('cards', table)
+        cards[str(num)].remove(card)
+        self.hset_redis('cards', table, cards)
+        self.hset_redis('table_last_hand', table, num)
+        self.hset_redis('table_last_turn', table, card)
+
+        get_status_list = [i + 1 for i in range(4) if i + 1 != int(num)]
+        self.hset_redis('table_last_hand_status', table, get_status_list)
+        await stream.write(bytes(RESPONSE_PLAY_CARD, encoding="utf8"))
+
+    def response_get_card(self, stream, data_list):
+        table = data_list[1]
+        num = data_list[2]
+
+        left_cards = self.hget_redis('left_cards', table)
+        table_last_hand_status = self.hget_redis('table_last_hand_status', table)
+
+        if not table_last_hand_status:
+            if not left_cards:
+                await stream.write(bytes(RESPONSE_GAME_OVER_NO_CARD, encoding="utf8"))
+            else:
+                card = left_cards[0]
+                left_cards = left_cards[1:]
+                table_last_hand = self.hget_redis('table_last_hand', table)
+                table_last_hand += 1
+                if table_last_hand == 5:
+                    table_last_hand = 1
+                    self.hset_redis('table_last_hand', table, table_last_hand)
+                if int(num) == table_last_hand:
+                    self.hset_redis('left_cards', table, left_cards)
+                    res_str = RESPONSE_GET_SELF_CARD + " " + str(card)
+                    await stream.write(bytes(res_str, encoding="utf8"))
+                else:
+                    await stream.write(bytes(STATUS_WAIT_FOR_GET_CARD, encoding="utf8"))
+        else:
+            num = int(num)
+            table_last_turn = self.hget_redis('table_last_turn', table)
+            if table_last_hand_status and num in table_last_hand_status:
+                table_last_hand_status.remove(num)
+                self.hset_redis(
+                    'table_last_hand_status', table, table_last_hand_status)
+                res_str = RESPONSE_GET_OTHER_CARD + " " + str(table_last_turn)
+                await stream.write(bytes(res_str, encoding="utf8"))
+            else:
+                await stream.write(bytes(STATUS_WAIT_FOR_GET_CARD, encoding="utf8"))
 
     async def handle_stream(self, stream, address):
         while True:
@@ -126,177 +274,30 @@ class EchoServer(TCPServer):
 
                 if data_list[0] == STATUS_NEW_GAME:
                     # 申请桌号的位置, 随机洗牌
-                    table_number, seat_number = self.apply_table()
-                    if seat_number == 4:
-                        self.shuffle_cards(table_number)
-                    await stream.write(
-                        bytes(
-                            str(table_number) + " " + str(seat_number), encoding="utf8"
-                        )
-                    )
-                elif data_list[0] == '2':
-                    if data_list[1] == '1':
-                        # 桌满发牌，桌未满等待
-                        table = data_list[2]
-                        num = data_list[3]
-                        current_table = self.get_current_table()
-                        current_num = self.get_current_num()
-                        cards = self.hget_redis('cards', table)
-                        if not cards:
-                            await stream.write(bytes("401", encoding="utf8"))
-                        else:
-                            if current_table > int(table) or \
-                               (current_table == int(table) and current_num == 4):
-                                cards = str(cards[str(num)])
-                                await stream.write(bytes(cards, encoding="utf8"))
-                            else:
-                                await stream.write(bytes("401", encoding="utf8"))
-                    elif data_list[1] == '2':
-                        # 换三张
-                        table = data_list[2]
-                        num = data_list[3]
-                        order = 0
-                        table_turn_order = self.hget_redis('table_turn_order', table)
-                        table_turn_pai = self.hget_redis('table_turn_pai', table)
-                        table_turn_status = self.hget_redis('table_turn_status', table)
+                    self.response_shuffle_cards(stream)
 
-                        if table_turn_order:
-                            order = table_turn_order
-                        else:
-                            rd = randint(1, 3)
-                            self.hset_redis('table_turn_order', table, rd)
-                            order = rd
-                        if not table_turn_pai:
-                            temp = {}
-                            temp[str(num)] = [data_list[4], data_list[5], data_list[6]]
-                            self.hset_redis('table_turn_pai', table, temp)
-                        else:
-                            table_turn_pai = table_turn_pai
-                            if str(num) not in table_turn_pai:
-                                temp = {str(num): [data_list[4], data_list[5], data_list[6]]}
-                                self.hset_redis('table_turn_pai', table, temp)
+                elif data_list[0] == STATUS_GET_INIT_CARDS:
+                    # 桌满发牌，桌未满等待
+                    self.response_init_cards(stream, data_list)
 
-                            if len(table_turn_pai) == 4 and\
-                                (not table_turn_status or
-                                 table_turn_status != 1):
-                                for one in table_turn_pai:
-                                    self.pop_card(
-                                        str(table), one, table_turn_pai[one])
-                                if order == 1:
-                                    for one in table_turn_pai:
-                                        temp = int(one)
-                                        temp += 1
-                                        if temp == 5:
-                                            temp = 1
-                                        self.push_card(
-                                            str(table), str(temp),
-                                            table_turn_pai[one])
-                                elif order == 2:
-                                    for one in table_turn_pai:
-                                        temp = int(one)
-                                        temp += 2
-                                        if temp > 4:
-                                            temp -= 4
-                                        self.push_card(
-                                            str(table), str(temp),
-                                            table_turn_pai[one])
-                                else:
-                                    for one in table_turn_pai:
-                                        temp = int(one)
-                                        temp -= 1
-                                        if temp == 0:
-                                            temp += 4
-                                        self.push_card(
-                                            str(table), str(temp),
-                                            table_turn_pai[one])
-                                self.hset_redis('table_turn_status', table, 1)
-                                # self.table_turn_status[str(table)] = 1
+                elif data_list[0] == STATUS_EXCHANGE_CARDS:
+                    # 换三张
+                    self.response_exchange_cards(stream, data_list)
 
-                        if not table_turn_status or\
-                           table_turn_status != 1:
-                            await stream.write(bytes("402", encoding="utf8"))
-                        else:
-                            if order == 1:
-                                temp = int(num)
-                                temp -= 1
-                                if temp == 0:
-                                    temp += 4
-                                data_list = table_turn_pai[str(temp)]
-                                data_list = [str(one) for one in data_list]
-                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
-                            elif order == 2:
-                                temp = int(num)
-                                temp += 2
-                                if temp > 4:
-                                    temp -= 4
-                                data_list = table_turn_pai[str(temp)]
-                                data_list = [str(one) for one in data_list]
-                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
-                            else:
-                                temp = int(num)
-                                temp += 1
-                                if temp > 4:
-                                    temp -= 4
-                                data_list = table_turn_pai[str(temp)]
-                                data_list = [str(one) for one in data_list]
-                                await stream.write(bytes(','.join(data_list), encoding="utf8"))
-                    elif data_list[1] == '3':
-                        # 有人赢牌 游戏结束
-                        table = data_list[2]
-                        num = data_list[3]
-                        await stream.write(bytes("200", encoding="utf8"))
-                    elif data_list[1] == '4':
-                        # 出牌
-                        table = data_list[2]
-                        num = data_list[3]
-                        pai = int(data_list[4])
-                        cards = self.hget_redis('cards', table)
-                        cards[str(num)].remove(pai)
-                        self.hset_redis('cards', table, cards)
-                        self.hset_redis('table_last_hand', table, pai)
-                        num = int(num)
-                        tmp = [1, 2, 3, 4]
-                        tmp.remove(num)
-                        self.hset_redis('table_last_hand_status', table, tmp)
-                        await stream.write(bytes("201", encoding="utf8"))
-                    elif data_list[1] == '5':
-                        # 给用户推送出的牌
-                        table = data_list[2]
-                        num = data_list[3]
-                        left_cards = self.hget_redis('left_cards', table)
-                        table_last_hand_status = self.hget_redis('table_last_hand_status', table)
-                        if not table_last_hand_status:
-                            if not left_cards:
-                                await stream.write(bytes("203", encoding="utf8"))
-                            else:
-                                pai = left_cards[0]
-                                left_cards = left_cards[1:]
-                                table_last_turn = self.hget_redis('table_last_turn', table)
-                                table_last_turn += 1
-                                if table_last_turn == 5:
-                                    table_last_turn = 1
-                                    self.hset_redis('table_last_turn', table, 1)
-                                num = int(num)
-                                if num == table_last_turn:
-                                    await stream.write(bytes("206 " + str(pai), encoding="utf8"))
-                                else:
-                                    await stream.write(bytes("202", encoding="utf8"))
-                        else:
-                            num = int(num)
-                            table_last_hand_status = self.hget_redis(
-                                'table_last_hand_status', table)
-                            table_last_hand = self.hget_redis('table_last_hand', table)
-                            if table_last_hand_status and num in table_last_hand_status\
-                               and not table_last_hand:
-                                pai = table_last_hand
-                                table_last_hand_status.remove(num)
-                                self.hset_redis(
-                                    'table_last_hand_status', table, table_last_hand_status)
-                                await stream.write(bytes("205 " + str(pai), encoding="utf8"))
-                            else:
-                                await stream.write(bytes("202", encoding="utf8"))
-                    else:
-                        pass
+                elif data_list[0] == STATUS_GAME_OVER:
+                    # 有人赢牌 游戏结束
+                    # table = data_list[1]
+                    # num = data_list[2]
+                    await stream.write(bytes(RESPONSE_GAME_OVER, encoding="utf8"))
+
+                elif data_list[0] == STATUS_PLAY_CARD:
+                    # 出牌
+                    self.response_play_card(stream, data_list)
+
+                elif data_list[0] == STATUS_GET_CARD:
+                    # 给用户推送出的牌
+                    self.response_get_card(stream, data_list)
+
                 else:
                     pass
             except StreamClosedError:

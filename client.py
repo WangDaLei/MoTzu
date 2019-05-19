@@ -4,7 +4,22 @@ import json
 import time
 import random
 from socket import socket, AF_INET, SOCK_STREAM
-from status_code import STATUS_NEW_GAME
+from status_code import (
+    STATUS_NEW_GAME,
+    STATUS_GAME_OVER,
+    STATUS_GET_INIT_CARDS,
+    STATUS_EXCHANGE_CARDS,
+    STATUS_PLAY_CARD,
+    STATUS_GET_PARD,
+    STATUS_WAIT_FOR_INIT_CARDS,
+    STATUS_WAIT_FOR_EXCHANGE_CARDS,
+    STATUS_WAIT_FOR_GET_CARD,
+    RESPONSE_GAME_OVER,
+    RESPONSE_GAME_OVER_NO_CARD,
+    RESPONSE_PLAY_CARD,
+    RESPONSE_GET_SELF_CARD,
+    RESPONSE_GET_OTHER_CARD
+)
 
 
 class Client():
@@ -31,13 +46,16 @@ class Client():
     def start(self):
         while True:
             print("+-+-+-+-+-+")
-            data = b'2 1 %b %b\n' % (
-                str.encode(self.table_number), str.encode(self.table_seat_number))
+            data = b'%b %b %b\n' % (
+                str.encode(STATUS_GET_INIT_CARDS),
+                str.encode(self.table_number),
+                str.encode(self.table_seat_number)
+            )
             self.cli.send(data)
             recv = self.cli.recv(1024)
             str_recv = str(recv, encoding="utf8")
             print(str_recv)
-            if str_recv == '401':
+            if str_recv == STATUS_WAIT_FOR_INIT_CARDS:
                 time.sleep(1)
             else:
                 list_recv = json.loads(str_recv)
@@ -124,16 +142,19 @@ class Client():
         self.print_pai_by_key(key, three)
         num_list = self.reverse_by_key(key, three)
 
-        data = b'2 2 %b %b %b %b %b\n' % (
-            str.encode(self.table_number), str.encode(self.table_seat_number),
-            str.encode(str(num_list[0])), str.encode(str(num_list[1])),
+        data = b'%b %b %b %b %b %b\n' % (
+            str.encode(STATUS_EXCHANGE_CARDS),
+            str.encode(self.table_number),
+            str.encode(self.table_seat_number),
+            str.encode(str(num_list[0])),
+            str.encode(str(num_list[1])),
             str.encode(str(num_list[2]))
         )
         while True:
             self.cli.send(data)
             recv = self.cli.recv(1024)
             str_recv = str(recv, encoding="utf8")
-            if str_recv == '402':
+            if str_recv == STATUS_WAIT_FOR_EXCHANGE_CARDS:
                 time.sleep(1)
             else:
                 num_list = str_recv.split(',')
@@ -285,32 +306,45 @@ class Client():
             if len(self.list_pai) % 3 == 2:
                 re, pai = self.discard()
                 if re:
-                    data = b'2 3 %b %b\n' % (
-                        str.encode(self.table_number), str.encode(self.table_seat_number))
+                    data = b'%b %b %b\n' % (
+                        str.encode(STATUS_GAME_OVER),
+                        str.encode(self.table_number),
+                        str.encode(self.table_seat_number)
+                    )
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
-                    if str_recv == '200':
+                    if str_recv == RESPONSE_GAME_OVER:
                         break
                 else:
-                    data = b'2 4 %b %b %s\n' % (
-                        str.encode(self.table_number), str.encode(self.table_seat_number),
+                    data = b'%b %b %b %s\n' % (
+                        str.encode(STATUS_PLAY_CARD),
+                        str.encode(self.table_number),
+                        str.encode(self.table_seat_number),
                         str.encode(str(pai))
                     )
                     self.cli.send(data)
                     recv = self.cli.recv(1024)
                     str_recv = str(recv, encoding="utf8")
+                    if str_recv == RESPONSE_PLAY_CARD:
+                        pass
             else:
-                data = b'2 5 %b %b\n' % (
-                    str.encode(self.table_number), str.encode(self.table_seat_number)
+                data = b'%b %b %b\n' % (
+                    str.encode(STATUS_GET_PARD),
+                    str.encode(self.table_number),
+                    str.encode(self.table_seat_number)
                 )
                 self.cli.send(data)
                 recv = self.cli.recv(1024)
                 str_recv = str(recv, encoding="utf8")
-                if str_recv == '202':
+                if str_recv == STATUS_WAIT_FOR_GET_CARD:
                     time.sleep(1)
-                elif str_recv == '203':
+                elif str_recv == RESPONSE_GAME_OVER_NO_CARD:
                     break
+                elif str_recv == RESPONSE_GET_OTHER_CARD:
+                    print(str_recv)
+                elif str_recv == RESPONSE_GET_SELF_CARD:
+                    print(str_recv)
                 else:
                     print(str_recv)
 
