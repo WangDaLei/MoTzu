@@ -1,0 +1,10 @@
+cards 存储所有的手牌 {table: {num: [], ...}, ...}
+left_cards 存储每桌剩余的牌 {table: [], ...}
+
+table_last_turn 存储上一轮的出牌 {table: card_num}
+table_last_hand 存储最后一个出牌的人的num {table: num, ...}
+table_last_hand_status 本轮出的牌还未被查阅的num {table: [], ...}
+
+table_exchange_mode 存储交换方式1,2,3三种方式 {table: mode}
+table_exchange_cards 交换的三张牌{table: {num: [], ...}, ...}
+table_exchange_status 表示是否交换 1表示已交换

@@ -10,7 +10,7 @@ from status_code import (
     STATUS_GET_INIT_CARDS,
     STATUS_EXCHANGE_CARDS,
     STATUS_PLAY_CARD,
-    STATUS_GET_PARD,
+    STATUS_GET_CARD,
     STATUS_WAIT_FOR_INIT_CARDS,
     STATUS_WAIT_FOR_EXCHANGE_CARDS,
     STATUS_WAIT_FOR_GET_CARD,
@@ -192,6 +192,7 @@ class Client():
             else:
                 str_pai += str(num) + 'W '
         print(str_pai)
+        print(list_pai)
 
     def whether_seven_couple(self):
         hand_pai = self.get_hand_pai_kind()
@@ -305,6 +306,7 @@ class Client():
         while True:
             if len(self.list_pai) % 3 == 2:
                 re, pai = self.discard()
+                self.print_pai()
                 if re:
                     data = b'%b %b %b\n' % (
                         str.encode(STATUS_GAME_OVER),
@@ -317,7 +319,7 @@ class Client():
                     if str_recv == RESPONSE_GAME_OVER:
                         break
                 else:
-                    data = b'%b %b %b %s\n' % (
+                    data = b'%b %b %b %b\n' % (
                         str.encode(STATUS_PLAY_CARD),
                         str.encode(self.table_number),
                         str.encode(self.table_seat_number),
@@ -330,7 +332,7 @@ class Client():
                         pass
             else:
                 data = b'%b %b %b\n' % (
-                    str.encode(STATUS_GET_PARD),
+                    str.encode(STATUS_GET_CARD),
                     str.encode(self.table_number),
                     str.encode(self.table_seat_number)
                 )
@@ -341,10 +343,12 @@ class Client():
                     time.sleep(1)
                 elif str_recv == RESPONSE_GAME_OVER_NO_CARD:
                     break
-                elif str_recv == RESPONSE_GET_OTHER_CARD:
-                    print(str_recv)
-                elif str_recv == RESPONSE_GET_SELF_CARD:
-                    print(str_recv)
+                elif str_recv.startswith(RESPONSE_GET_OTHER_CARD):
+                    pass
+                elif str_recv.startswith(RESPONSE_GET_SELF_CARD):
+                    recv_list = str_recv.strip().split(' ')
+                    self.list_pai.append(int(recv_list[1]))
+                    self.print_pai()
                 else:
                     print(str_recv)
 

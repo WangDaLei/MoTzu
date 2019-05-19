@@ -114,8 +114,8 @@ class EchoServer(TCPServer):
         self.hset_redis('cards', table, cards)
         self.hset_redis('left_cards', table, cards_list[53:])
         # self.hset_redis('table_last_turn', table, 1)
-        self.hset_redis('table_last_hand', table, 1)
-        self.hset_redis('table_last_hand_status', table, [2, 3, 4])
+        # self.hset_redis('table_last_hand', table, 1)
+        # self.hset_redis('table_last_hand_status', table, [2, 3, 4])
 
     def pop_card(self, table, num, card_list):
         for one in card_list:
@@ -145,7 +145,7 @@ class EchoServer(TCPServer):
 
         self.hset_redis('table_exchange_status', table, 1)
 
-    def response_shuffle_cards(self, stream):
+    async def response_shuffle_cards(self, stream):
         table_number, seat_number = self.apply_table()
         if seat_number == 4:
             self.shuffle_cards(table_number)
@@ -156,7 +156,7 @@ class EchoServer(TCPServer):
             )
         )
 
-    def response_init_cards(self, stream, data_list):
+    async def response_init_cards(self, stream, data_list):
         table = data_list[1]
         num = data_list[2]
         current_table = self.get_current_table()
@@ -176,7 +176,7 @@ class EchoServer(TCPServer):
                     bytes(STATUS_WAIT_FOR_INIT_CARDS, encoding="utf8")
                 )
 
-    def response_exchange_cards(self, stream, data_list):
+    async def response_exchange_cards(self, stream, data_list):
         table = data_list[1]
         num = data_list[2]
 
@@ -211,11 +211,11 @@ class EchoServer(TCPServer):
             exchange_num = (int(num) + 4 - exchange_mode) % 4
             if exchange_num == 0:
                 exchange_num = 4
-            exchang_list = table_exchange_cards(str(exchange_num))
+            exchang_list = table_exchange_cards[str(exchange_num)]
             exchang_list = [str(one) for one in exchang_list]
             await stream.write(bytes(','.join(exchang_list), encoding="utf8"))
 
-    def response_play_card(self, stream, data_list):
+    async def response_play_card(self, stream, data_list):
         table = data_list[1]
         num = data_list[2]
         card = int(data_list[3])
@@ -229,7 +229,7 @@ class EchoServer(TCPServer):
         self.hset_redis('table_last_hand_status', table, get_status_list)
         await stream.write(bytes(RESPONSE_PLAY_CARD, encoding="utf8"))
 
-    def response_get_card(self, stream, data_list):
+    async def response_get_card(self, stream, data_list):
         table = data_list[1]
         num = data_list[2]
 
@@ -243,11 +243,15 @@ class EchoServer(TCPServer):
                 card = left_cards[0]
                 left_cards = left_cards[1:]
                 table_last_hand = self.hget_redis('table_last_hand', table)
+                table_last_hand = int(table_last_hand) if table_last_hand else 0
                 table_last_hand += 1
                 if table_last_hand == 5:
                     table_last_hand = 1
-                    self.hset_redis('table_last_hand', table, table_last_hand)
+                    # self.hset_redis('table_last_hand', table, table_last_hand)
                 if int(num) == table_last_hand:
+                    cards = self.hget_redis('cards', table)
+                    cards[str(num)].append(card)
+                    self.hset_redis('cards', table, cards)
                     self.hset_redis('left_cards', table, left_cards)
                     res_str = RESPONSE_GET_SELF_CARD + " " + str(card)
                     await stream.write(bytes(res_str, encoding="utf8"))
@@ -274,15 +278,15 @@ class EchoServer(TCPServer):
 
                 if data_list[0] == STATUS_NEW_GAME:
                     # 申请桌号的位置, 随机洗牌
-                    self.response_shuffle_cards(stream)
+                    await self.response_shuffle_cards(stream)
 
                 elif data_list[0] == STATUS_GET_INIT_CARDS:
                     # 桌满发牌，桌未满等待
-                    self.response_init_cards(stream, data_list)
+                    await self.response_init_cards(stream, data_list)
 
                 elif data_list[0] == STATUS_EXCHANGE_CARDS:
                     # 换三张
-                    self.response_exchange_cards(stream, data_list)
+                    await self.response_exchange_cards(stream, data_list)
 
                 elif data_list[0] == STATUS_GAME_OVER:
                     # 有人赢牌 游戏结束
@@ -292,11 +296,11 @@ class EchoServer(TCPServer):
 
                 elif data_list[0] == STATUS_PLAY_CARD:
                     # 出牌
-                    self.response_play_card(stream, data_list)
+                    await self.response_play_card(stream, data_list)
 
                 elif data_list[0] == STATUS_GET_CARD:
                     # 给用户推送出的牌
-                    self.response_get_card(stream, data_list)
+                    await self.response_get_card(stream, data_list)
 
                 else:
                     pass
