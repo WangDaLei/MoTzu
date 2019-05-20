@@ -1,5 +1,4 @@
 import tornado
-import MySQLdb
 import redis
 import json
 from random import shuffle, randint
@@ -29,63 +28,7 @@ class EchoServer(TCPServer):
 
     def __init__(self):
         super(EchoServer, self).__init__()
-        self.db, self.cursor = self.get_database_cursor()
         self.redis = self.get_redis_connection()
-
-    def get_redis_connection(self):
-        pool = redis.ConnectionPool(
-            host='127.0.0.1', port=6379
-        )
-        r = redis.Redis(connection_pool=pool)
-        return r
-
-    def get_database_cursor(self):
-        db = MySQLdb.connect("localhost", "root", "123456", "stock", charset='utf8')
-        cursor = db.cursor()
-        return db, cursor
-
-    def get_current_table(self):
-        sql = "select * from majiang_config where name = 'table' limit 1;"
-        self.cursor.execute(sql)
-        table = self.cursor.fetchone()[2]
-        self.db.commit()
-        return table
-
-    def get_current_num(self):
-        sql = "select * from majiang_config where name = 'count' limit 1;"
-        self.cursor.execute(sql)
-        num = self.cursor.fetchone()[2]
-        self.db.commit()
-        return num
-
-    def apply_table(self):
-        sql_table = "select * from majiang_config where name = 'table' for update;"
-        sql_seat = "select * from majiang_config where name = 'count' for update;"
-        update_sql_table = "update majiang_config set value = '%s' where name = 'table'; "
-        update_sql_seat = "update majiang_config set value = '%s' where name = 'count'; "
-
-        cursor = self.db.cursor()
-        table_num = 0
-        seat_num = 0
-        try:
-            cursor.execute("set autocommit=0;")
-            cursor.execute(sql_table)
-            table_num = cursor.fetchone()[2]
-            cursor.execute(sql_seat)
-            seat_num = cursor.fetchone()[2]
-            if seat_num == 4:
-                cursor.execute(update_sql_table % (table_num + 1))
-                cursor.execute(update_sql_seat % (1))
-                seat_num = 1
-                table_num += 1
-            else:
-                cursor.execute(update_sql_seat % (seat_num + 1))
-                seat_num += 1
-            self.db.commit()
-        except Exception as e:
-            print(e)
-            self.db.rollback()
-        return table_num, seat_num
 
     def hset_redis(self, name, key, value):
         self.redis.hset(name, key, json.dumps(value))
@@ -95,6 +38,48 @@ class EchoServer(TCPServer):
             return json.loads(self.redis.hget(name, key))
         else:
             return None
+
+    def set_redis(self, key, value):
+        self.redis.set(key, json.dumps(value))
+
+    def get_redis(self, key):
+        if self.redis.get(key):
+            return json.loads(self.redis.get(key))
+        else:
+            return None
+
+    def get_redis_connection(self):
+        pool = redis.ConnectionPool(
+            host='127.0.0.1', port=6379
+        )
+        r = redis.Redis(connection_pool=pool)
+        return r
+
+    def get_current_table(self):
+        seat_num = self.get_redis('seat_num')
+        return seat_num if seat_num else 1
+
+    def get_current_num(self):
+        table_num = self.get_redis('table_num')
+        return table_num if table_num else 1
+
+    def apply_table(self):
+        table_num = self.get_redis('table_num')
+        seat_num = self.get_redis('seat_num')
+
+        if not table_num:
+            table_num = 1
+            seat_num = 1
+        else:
+            if seat_num == 4:
+                table_num += 1
+                seat_num = 1
+            else:
+                seat_num += 1
+
+        self.set_redis('table_num', table_num)
+        self.set_redis('seat_num', seat_num)
+        return table_num, seat_num
 
     def shuffle_cards(self, table_number):
         # 洗牌并给客户端分发初始的牌
@@ -113,9 +98,6 @@ class EchoServer(TCPServer):
 
         self.hset_redis('cards', table, cards)
         self.hset_redis('left_cards', table, cards_list[53:])
-        # self.hset_redis('table_last_turn', table, 1)
-        # self.hset_redis('table_last_hand', table, 1)
-        # self.hset_redis('table_last_hand_status', table, [2, 3, 4])
 
     def pop_card(self, table, num, card_list):
         for one in card_list:

@@ -8,3 +8,6 @@ table_last_hand_status 本轮出的牌还未被查阅的num {table: [], ...}
 table_exchange_mode 存储交换方式1,2,3三种方式 {table: mode}
 table_exchange_cards 交换的三张牌{table: {num: [], ...}, ...}
 table_exchange_status 表示是否交换 1表示已交换
+
+table_num key-value pair 存储当前最大的桌号
+seat_num key-value pair 存储当前座位号桌号
